@@ -111,19 +111,20 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 (function(){
 'use strict';
 var KEY='morning-window-v1', MIN=60000, HOUR=3600000;
-var ORDER=['baseline','prunes','kiwi','earlyDinner'];
+var ORDER=['baseline','prunes','kiwi','pear','earlyDinner'];
 var FOCUS={
   baseline:{label:'Learn your normal',plan:'No changes this week. Keep your usual evening and log your mornings so the app learns your baseline.'},
-  prunes:{label:'Prunes in the evening',plan:'Eat prunes after dinner: 4–5 for the first few days, then build up to 8–10. Drink a glass of water with them.'},
+  prunes:{label:'Prunes in the evening',plan:'Eat prunes after dinner: 4–5 for the first few days, then build up to 8–10. A glass of prune juice also works.'},
   kiwi:{label:'Two kiwis a day',plan:'Eat 2 kiwis today. Evening is fine. Skin on adds more fiber if you like it.'},
+  pear:{label:'A pear every day',plan:'Eat a ripe pear today. Evening is fine.'},
   earlyDinner:{label:'Earlier, lighter dinner',plan:'Finish dinner by 19:00 and keep it moderate.'},
   keep:{label:'Keep what works',plan:'The experiments are done. Stick with the habits that helped.'}
 };
-var KEEP_TEXT={prunes:'Prunes after dinner (8–10).',kiwi:'2 kiwis during the day.',earlyDinner:'Dinner finished by 19:00.'};
+var KEEP_TEXT={prunes:'Prunes after dinner (8–10).',kiwi:'2 kiwis during the day.',pear:'A ripe pear every day.',earlyDinner:'Dinner finished by 19:00.'};
 var STEPS=[
-  {id:'water',title:'Drink warm water',how:'A big glass, 300–500 ml, warm not hot. Before anything else.'},
-  {id:'coffee',title:'Coffee',how:'Drink it while it is warm, in the first 10 minutes.'},
-  {id:'food',title:'Eat something',how:'Even something small. Warm food works best: oats, toast, yogurt with fruit.'},
+  {id:'water',title:'Warm honey water',how:'A big glass, 300–500 ml, warm not hot, with a spoon of good honey stirred in. Before anything else.'},
+  {id:'coffee',title:'Coffee',how:'Drink it while it is warm, in the first 10 minutes. No coffee after 12:00.'},
+  {id:'food',title:'Eat something',how:'Warm works best: oats cooked in water with banana or dates, or sourdough toast with butter, tahini or honey.'},
   {id:'move',title:'Move for 2 minutes',how:'March in place, 10 squats, torso twists, knees up to chest.',timer:120},
   {id:'massage',title:'Belly massage, 1 minute',how:'Slow circles, clockwise: up your right side, across under the ribs, down your left side.',timer:60}
 ];
@@ -294,7 +295,7 @@ function renderMorning(){
   if(el>=mv&&!done.move)next=STEPS[3];
   else for(var i=0;i<STEPS.length;i++){if(!done[STEPS[i].id]){next=STEPS[i];break;}}
   var nudge='';
-  if(el>=8&&!done.water&&!done.coffee)nudge='You are '+el+' min in. Get the warm drink in now.';
+  if(el>=8&&!done.water&&!done.coffee)nudge='You are '+el+' min in. Get the warm honey water in now.';
   else if(el>=mv&&!done.move)nudge=el+' min in. This is usually where it stalls, so move now.';
   else if(left<=10&&left>0)nudge=left+' min left. One more round of squats and a warm sip.';
   var out='<section class="card hero"><div class="clock"><div class="left'+(left<0?' late':'')+'"><p class="eyebrow">'+(left>=0?'Leave in':'Past leave time')+'</p><b>'+Math.abs(left)+'</b> <span class="muted">min</span></div><div class="right muted">Up at <span class="num">'+hm(m.up)+'</span><br><span class="num">'+el+'</span> min in</div></div>'+(nudge?'<div class="nudge" role="status">'+esc(nudge)+'</div>':'')+'</section>';
@@ -306,7 +307,7 @@ function renderMorning(){
     else out+='<button class="btn big primary" data-act="step" data-id="'+next.id+'">Done</button>';
     out+='</section>';
   } else {
-    out+='<section class="card"><p class="eyebrow">All triggers done</p><div class="step-title">Relax and let it come.</div><p class="muted">Sip something warm, breathe slowly into your belly, stay close by. Go when you feel it. No straining.</p></section>';
+    out+='<section class="card"><p class="eyebrow">All triggers done</p><div class="step-title">Relax and let it come.</div><p class="muted">Sip something warm (honey water, or ginger, fennel or chamomile tea), breathe slowly into your belly, stay close by. Go when you feel it. No straining.</p></section>';
   }
   out+='<div class="chips">'+STEPS.map(function(st){var d=done[st.id];return '<button class="chip'+(d?' done':'')+'" data-act="chip" data-id="'+st.id+'" aria-pressed="'+(d?'true':'false')+'">'+(d?'✓ ':'')+esc(st.title.split(',')[0])+(d?' <span class="t">+'+Math.max(0,Math.round((d-m.up)/MIN))+'</span>':'')+'</button>';}).join('')+'</div>';
   if(s.tip)out+='<section class="card"><p class="eyebrow">From your plan</p><p>'+esc(s.tip)+'</p></section>';
@@ -320,7 +321,9 @@ function planItems(){
   var s=D.settings,items=[],f=FOCUS[s.focus.name]||FOCUS.baseline;
   items.push('<b>'+esc(f.label)+'.</b> '+esc(f.plan));
   s.keepers.forEach(function(k){if(k!==s.focus.name&&KEEP_TEXT[k])items.push('<b>Keep:</b> '+esc(KEEP_TEXT[k]));});
-  items.push('Drink 6–8 glasses of water over the day.');
+  items.push('Drink about 1 litre over the day.');
+  items.push('A spoon of olive oil today, on cooked vegetables, potatoes or fish.');
+  items.push('Some fiber today: oats, barley, whole-wheat or barley bread, sweet potato, pear, kiwi, dates.');
   items.push('Set the coffee to be ready at <span class="num">'+s.wake+'</span>. Put a glass by the kettle.');
   items.push('In bed by <span class="num">'+minusHM(s.wake,450)+'</span> to get 7½ hours.');
   return items;
@@ -331,14 +334,14 @@ function renderEvening(open){
   var dayN=s.focus.start?daysBetween(s.focus.start,t)+1:1;
   var expanded=open||eveningOpen;
   var out='<section class="card'+(open?' hero':'')+'"><div class="spread"><p class="eyebrow">Tonight, for tomorrow '+s.wake+'</p>'+(s.focus.name!=='keep'&&s.focus.name!=='baseline'?'<span class="tag">day '+Math.min(dayN,14)+' of 7</span>':'')+'</div>';
-  if(rough)out+='<div class="nudge">'+esc(rough)+' Tonight add prunes or 2 kiwis, plus 2 extra glasses of water.</div>';
+  if(rough)out+='<div class="nudge">'+esc(rough)+' Tonight add prunes (or prune juice) or 2 kiwis, and an extra glass of water.</div>';
   out+='<ul class="plan">'+planItems().map(function(i){return '<li><span>'+i+'</span></li>';}).join('')+'</ul>';
   if(e.done)out+='<p class="muted">Checked in for tonight. ✓</p>';
   if(expanded&&!e.done){
     out+='<div class="sep"></div><h3>How did today go?</h3>';
-    out+='<div class="seg-row"><span>Prunes</span>'+seg('prunes',[['y','Yes'],['n','No']],e.prunes)+'</div>';
-    out+='<div class="seg-row"><span>Kiwi</span>'+seg('kiwi',[['y','Yes'],['n','No']],e.kiwi)+'</div>';
-    out+='<div class="seg-row"><span>Water today</span>'+seg('water',[['good','Good'],['low','Low']],e.water)+'</div>';
+    out+='<div><p class="muted" style="margin-bottom:8px">Fruit today (tap all you ate)</p><div class="chips">'+[['prunes','Prunes'],['kiwi','Kiwi'],['pear','Pear']].map(function(f){var on=e[f[0]]==='y';return '<button class="chip'+(on?' done':'')+'" data-act="eve-toggle" data-f="'+f[0]+'" aria-pressed="'+on+'">'+(on?'✓ ':'')+f[1]+'</button>';}).join('')+'</div></div>';
+    out+='<div class="seg-row"><span>Olive oil</span>'+seg('oil',[['y','Yes'],['n','No']],e.oil)+'</div>';
+    out+='<div class="seg-row"><span>About 1 litre to drink</span>'+seg('water',[['good','Yes'],['low','Less']],e.water)+'</div>';
     out+='<div class="seg-row"><span>Dinner by 19:00</span>'+seg('dinner',[['y','Yes'],['n','No']],e.dinner)+'</div>';
     out+='<div class="seg-row"><span>Alcohol</span>'+seg('alcohol',[['n','No'],['y','Yes']],e.alcohol)+'</div>';
     out+='<button class="btn big primary" data-act="eve-done">Done for tonight</button>';
@@ -363,7 +366,7 @@ function chartSvg(){
     else if(o&&o.missed)g+='<text x="'+cx+'" y="'+(y(win)-6)+'" fill="var(--bad)" font-size="11" text-anchor="middle" font-weight="700">✕</text>';
     else g+='<circle cx="'+cx+'" cy="'+(y(0)-3)+'" r="1.5" fill="var(--line)"/>';
     var ev=D.evenings[addDays(k,-1)];
-    if(ev&&(ev.prunes==='y'||ev.kiwi==='y'))g+='<circle cx="'+cx+'" cy="'+(H-20)+'" r="2.4" fill="var(--good)"/>';
+    if(ev&&(ev.prunes==='y'||ev.kiwi==='y'||ev.pear==='y'))g+='<circle cx="'+cx+'" cy="'+(H-20)+'" r="2.4" fill="var(--good)"/>';
     g+='<text x="'+cx+'" y="'+(H-6)+'" fill="var(--muted)" font-size="8" text-anchor="middle" font-family="var(--f-mono)">'+Number(k.slice(8))+'</text>';
   });
   return g+'</svg>';
@@ -371,7 +374,7 @@ function chartSvg(){
 
 function renderProgress(){
   var s=statsFor(last14()),st=D.settings,t=today();
-  var out='<section class="card"><p class="eyebrow">Last 14 days</p><div class="stats"><div class="stat"><b>'+(s.n?s.on+'/'+s.n:'–')+'</b><span>mornings on time</span></div><div class="stat"><b>'+(s.median!=null?s.median:'–')+'</b><span>median min to go</span></div><div class="stat"><b>'+s.missed+'</b><span>left without</span></div></div>'+chartSvg()+'<p class="muted" style="font-size:.85rem">Bars: minutes from getting up to going. ✕ = left without going. Green dot = prunes or kiwi the evening before.</p></section>';
+  var out='<section class="card"><p class="eyebrow">Last 14 days</p><div class="stats"><div class="stat"><b>'+(s.n?s.on+'/'+s.n:'–')+'</b><span>mornings on time</span></div><div class="stat"><b>'+(s.median!=null?s.median:'–')+'</b><span>median min to go</span></div><div class="stat"><b>'+s.missed+'</b><span>left without</span></div></div>'+chartSvg()+'<p class="muted" style="font-size:.85rem">Bars: minutes from getting up to going. ✕ = left without going. Green dot = prunes, kiwi or pear the day before.</p></section>';
   var f=FOCUS[st.focus.name]||FOCUS.baseline,dayN=st.focus.start?daysBetween(st.focus.start,t)+1:1;
   out+='<section class="card"><p class="eyebrow">Current focus</p><h2>'+esc(f.label)+'</h2><p class="muted">'+(st.focus.name==='keep'?'All experiments finished.':'Day '+dayN+' of 7. After 7 days with at least 4 logged mornings, the app compares it with your normal and moves on.')+'</p>';
   var rk=Object.keys(st.results);
@@ -388,7 +391,7 @@ function renderSettings(){
   '<section class="card"><h2>Send to Claude</h2><p class="muted">Copies a short summary of the last 14 days. Paste it in our chat and I will send back a plan code.</p><button class="btn big primary" data-act="copy-summary">Copy summary</button><textarea id="out-summary" readonly hidden aria-label="Summary text"></textarea></section>'+
   '<section class="card"><h2>Plan from Claude</h2><p class="muted">Paste the plan code I give you, then tap Apply.</p><textarea id="in-plan" placeholder="PLAN {&quot;focus&quot;:&quot;prunes&quot;, ...}" aria-label="Plan code"></textarea><button class="btn primary" data-act="apply-plan">Apply plan</button>'+(s.tip?'<p class="muted">Current note: '+esc(s.tip)+'</p>':'')+'</section>'+
   '<section class="card"><h2>Backup</h2><p class="muted">Your data lives only on this phone'+(storageOk?'':' (and storage is blocked here, so it will be lost when you close this page)')+'. Copy a backup now and then, and keep it in a note or message.</p><div class="row"><button class="btn" data-act="copy-backup">Copy backup</button></div><textarea id="out-backup" readonly hidden aria-label="Backup text"></textarea><textarea id="in-backup" placeholder="Paste a backup here to restore" aria-label="Restore backup"></textarea>'+(confirmKey==='restore'?'<button class="btn danger" data-act="restore-confirm">Tap again: replace all data with this backup</button>':'<button class="btn" data-act="restore">Restore backup</button>')+'</section>'+
-  '<section class="card"><h2>Good to know</h2><p class="muted">This app suggests food, drinks, movement and timing only. See a doctor for blood in your stool, ongoing pain, or a lasting change in your habits.</p></section>';
+  '<section class="card"><h2>Good to know</h2><p class="muted">This app suggests food, drinks, movement and timing only, and its food suggestions follow your diet list. See a doctor for blood in your stool, ongoing pain, or a lasting change in your habits.</p></section>';
 }
 
 /* ---------- summary + plan ---------- */
@@ -404,7 +407,7 @@ function summary(){
     if(o){var m=o.m,sp=STEPS.filter(function(x){return m.steps&&m.steps[x.id];}).map(function(x){return x.id[0].toUpperCase()+'+'+Math.round((m.steps[x.id]-m.up)/MIN);}).join(' ');
       parts.push('up '+hm(m.up)+(sp?' '+sp:'')+' → '+(o.onTime?'went +'+o.ttu+' ('+hm(o.bm.t)+')'+(o.ease?' '+o.ease:''):(o.missed?'MISSED':'open')));}
     else parts.push('no morning');
-    if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.water)ev.push('water '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(e.alcohol==='y')ev.push('alcohol');if(ev.length)parts.push('eve before: '+ev.join(', '));}
+    if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.pear==='y')ev.push('pear');if(e.oil)ev.push('oil '+e.oil);if(e.water)ev.push('water '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(e.alcohol==='y')ev.push('alcohol');if(ev.length)parts.push('eve before: '+ev.join(', '));}
     lines.push(parts.join(' | '));
   });
   var from=at(keys[0],'00:00');
@@ -480,6 +483,7 @@ document.addEventListener('click',function(e){
     case 'bm-save': saveBm();return;
     case 'bm-cancel': var m5=D.mornings[t];if(m5&&m5.urge&&!m5.ended)delete m5.urge;save();draft=null;drawSheet();return;
     case 'eve': var e2=D.evenings[t]=D.evenings[t]||{};e2[b.dataset.f]=b.dataset.v;save();break;
+    case 'eve-toggle': var e4=D.evenings[t]=D.evenings[t]||{};e4[b.dataset.f]=e4[b.dataset.f]==='y'?'n':'y';save();break;
     case 'eve-open': eveningOpen=true;break;
     case 'eve-reopen': if(D.evenings[t])D.evenings[t].done=false;eveningOpen=true;save();break;
     case 'eve-done': var e3=D.evenings[t]=D.evenings[t]||{};e3.done=true;eveningOpen=false;save();toast('Good night. See you at '+D.settings.wake);break;
