@@ -425,7 +425,6 @@ function renderEvening(open){
     out+='<div class="seg-row"><span>Olive oil</span>'+seg('oil',[['y','Yes'],['n','No']],e.oil)+'</div>';
     out+='<div class="seg-row"><span>About 1 litre to drink</span>'+seg('water',[['good','Yes'],['low','Less']],e.water)+'</div>';
     out+='<div class="seg-row"><span>Dinner by 19:00</span>'+seg('dinner',[['y','Yes'],['n','No']],e.dinner)+'</div>';
-    out+='<div class="seg-row"><span>Alcohol</span>'+seg('alcohol',[['n','No'],['y','Yes']],e.alcohol)+'</div>';
     out+='<button class="btn big primary" data-act="eve-done">Done for tonight</button>';
   } else if(!e.done){
     out+='<button class="btn" data-act="eve-open">Evening check-in</button>';
@@ -527,7 +526,7 @@ function summary(){
       parts.push(o.bm?o.session.map(function(b,i){return (i===0?'FIRST BM':'then')+' +'+Math.round((b.t-m.up)/MIN)+' ('+hm(b.t)+')'+(b.ease?' '+b.ease:'')+(b.complete==='partial'?' not-complete':(b.complete==='full'?' complete':''));}).join(' | ')+(o.full?' | fully empty at +'+o.tte:' | not fully empty'):(o.none?'no BM that day':'waiting'));}
     else if(!e)return;
     else parts.push('no morning logged');
-    if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.pear==='y')ev.push('pear');if(e.oil)ev.push('oil '+e.oil);if(e.water)ev.push('1L '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(e.alcohol==='y')ev.push('alcohol');if(ev.length)parts.push('day before: '+ev.join(', '));}
+    if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.pear==='y')ev.push('pear');if(e.oil)ev.push('oil '+e.oil);if(e.water)ev.push('1L '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(ev.length)parts.push('day before: '+ev.join(', '));}
     lines.push(parts.join(' | '));
   });
   var from=at(keys[0],'00:00');
