@@ -76,6 +76,10 @@ ul.plan li::before{content:"";width:12px;height:12px;border-radius:4px;border:2p
 .stat b{font-family:var(--f-mono);font-size:1.5rem;font-variant-numeric:tabular-nums}
 .stat span{font-size:.8rem;color:var(--muted)}
 .chart{width:100%;height:auto;display:block}
+table.days{border-collapse:collapse;width:100%;font-size:.85rem;font-variant-numeric:tabular-nums}
+table.days th{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:6px 6px 6px 0;font-weight:700;border-bottom:1px solid var(--line)}
+table.days td{padding:8px 6px 8px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+.card h3{margin-top:4px}
 .log{display:flex;flex-direction:column}
 .log-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
 .log-item:first-child{border-top:0}
@@ -169,7 +173,19 @@ function outcome(key){
   var bm=D.bms.filter(function(b){return b.t>=m.up-5*MIN&&b.t<end;}).sort(function(a,b){return a.t-b.t;})[0]||null;
   var ttu=bm?Math.max(0,Math.round((bm.t-m.up)/MIN)):null;
   var none=!bm&&Date.now()>=end;
-  return {key:key,m:m,bm:bm,ttu:ttu,none:none,closed:!!bm||none,hit:ttu!=null&&ttu<=target(),ease:bm?bm.ease:null,complete:bm?bm.complete:null};
+  var session=[];
+  if(bm){
+    var later=D.bms.filter(function(b){return b.t>=bm.t&&b.t<end;}).sort(function(a,b){return a.t-b.t;});
+    for(var i=0;i<later.length;i++){
+      if(i>0&&(later[i].t-later[i-1].t>3*HOUR||later[i-1].complete==='full'))break;
+      session.push(later[i]);
+    }
+  }
+  var fullB=session.filter(function(b){return b.complete==='full';})[0]||null;
+  var tte=fullB?Math.max(0,Math.round((fullB.t-m.up)/MIN)):null;
+  var last=session.length?session[session.length-1]:null;
+  return {key:key,m:m,bm:bm,ttu:ttu,none:none,closed:!!bm||none,hit:ttu!=null&&ttu<=target(),ease:bm?bm.ease:null,complete:bm?bm.complete:null,
+    session:session,full:!!fullB,tte:tte,last:last,span:last?Math.max(0,Math.round((last.t-m.up)/MIN)):null};
 }
 function statsFor(keys){
   var outs=keys.map(outcome).filter(function(o){return o&&o.closed;});
@@ -177,7 +193,54 @@ function statsFor(keys){
   var hit=outs.filter(function(o){return o.hit;}).length;
   var med=t.length?(t.length%2?t[(t.length-1)/2]:Math.round((t[t.length/2-1]+t[t.length/2])/2)):null;
   var avg=t.length?Math.round(t.reduce(function(a,b){return a+b;},0)/t.length):null;
-  return {n:outs.length,hit:hit,none:outs.length-t.length,median:med,avg:avg,min:t.length?t[0]:null,max:t.length?t[t.length-1]:null,rate:outs.length?hit/outs.length:null};
+  var em=outs.filter(function(o){return o.tte!=null;}).map(function(o){return o.tte;}).sort(function(a,b){return a-b;});
+  var emed=em.length?(em.length%2?em[(em.length-1)/2]:Math.round((em[em.length/2-1]+em[em.length/2])/2)):null;
+  return {full:em.length,emptyMedian:emed,n:outs.length,hit:hit,none:outs.length-t.length,median:med,avg:avg,min:t.length?t[0]:null,max:t.length?t[t.length-1]:null,rate:outs.length?hit/outs.length:null};
+}
+function avgOf(a){return a.length?Math.round(a.reduce(function(x,y){return x+y;},0)/a.length):null;}
+function medOf(a){if(!a.length)return null;var t=a.slice().sort(function(x,y){return x-y;});return t.length%2?t[(t.length-1)/2]:Math.round((t[t.length/2-1]+t[t.length/2])/2);}
+function dayRows(keys){
+  return keys.map(function(k){
+    var o=outcome(k);if(!o||!o.bm)return null;
+    var m=o.m,st=m.steps||{},e=D.evenings[addDays(k,-1)]||null;
+    var off=function(id){return st[id]?Math.round((st[id]-m.up)/MIN):null;};
+    var prev=D.bms.filter(function(b){return b.t<m.up-5*MIN;}).sort(function(a,b){return b.t-a.t;})[0];
+    return {k:k,up:m.up,ttu:o.ttu,span:o.span,count:o.session.length,full:o.full,tte:o.tte,
+      water:off('water'),coffee:off('coffee'),food:off('food'),
+      fruit:e?(e.prunes==='y'||e.kiwi==='y'||e.pear==='y'):null,oil:e?e.oil||null:null,dinner:e?e.dinner||null:null,
+      prevH:prev?(m.up-prev.t)/HOUR:null,wakeMin:new Date(m.up).getHours()*60+new Date(m.up).getMinutes()};
+  }).filter(Boolean);
+}
+function insights(){
+  var t=today(),keys=keysBetween(addDays(t,-29),t),rows=dayRows(keys),I={rows:rows};
+  var ttus=rows.map(function(r){return r.ttu;});
+  I.n=rows.length;I.avg=avgOf(ttus);I.med=medOf(ttus);
+  I.min=ttus.length?Math.min.apply(null,ttus):null;I.max=ttus.length?Math.max.apply(null,ttus):null;
+  var tt=rows.filter(function(r){return r.tte!=null;}).map(function(r){return r.tte;});
+  I.fullN=tt.length;I.fullAvg=avgOf(tt);
+  I.perMorning=rows.length?Math.round(rows.reduce(function(a,r){return a+r.count;},0)/rows.length*10)/10:null;
+  var c=rows.filter(function(r){return r.coffee!=null&&r.ttu>=r.coffee;}).map(function(r){return r.ttu-r.coffee;});
+  var f=rows.filter(function(r){return r.food!=null&&r.ttu>=r.food;}).map(function(r){return r.ttu-r.food;});
+  I.afterCoffee=avgOf(c);I.afterCoffeeN=c.length;I.afterFood=avgOf(f);I.afterFoodN=f.length;
+  var a7=rows.filter(function(r){return r.k>addDays(t,-7);}).map(function(r){return r.ttu;}),p7=rows.filter(function(r){return r.k<=addDays(t,-7)&&r.k>addDays(t,-14);}).map(function(r){return r.ttu;});
+  I.week=avgOf(a7);I.prevWeek=avgOf(p7);I.weekN=a7.length;I.prevWeekN=p7.length;
+  var dayKeys=keysBetween(addDays(t,-13),t),bm14=D.bms.filter(function(b){return dk(b.t)>=dayKeys[0];});
+  var activeDays=dayKeys.filter(function(k){return D.mornings[k]||bm14.some(function(b){return dk(b.t)===k;});}).length;
+  I.perDay=activeDays?Math.round(bm14.length/activeDays*10)/10:null;
+  function cmp(label,yes,no,yesTxt,noTxt){
+    var A=rows.filter(yes).map(function(r){return r.ttu;}),B=rows.filter(no).map(function(r){return r.ttu;});
+    return {label:label,yesTxt:yesTxt,noTxt:noTxt,an:A.length,bn:B.length,a:avgOf(A),b:avgOf(B),ready:A.length>=2&&B.length>=2};
+  }
+  I.cmps=[
+    cmp('Coffee early',function(r){return r.coffee!=null&&r.coffee<=10;},function(r){return r.coffee!=null&&r.coffee>10;},'coffee within 10 min','coffee later'),
+    cmp('Food early',function(r){return r.food!=null&&r.food<=15;},function(r){return r.food!=null&&r.food>15;},'food within 15 min','food later'),
+    cmp('Fruit the day before',function(r){return r.fruit===true;},function(r){return r.fruit===false;},'prunes, kiwi or pear','no fruit'),
+    cmp('Olive oil the day before',function(r){return r.oil==='y';},function(r){return r.oil==='n';},'olive oil','no olive oil'),
+    cmp('Dinner by 19:00',function(r){return r.dinner==='y';},function(r){return r.dinner==='n';},'dinner by 19:00','later dinner'),
+    cmp('Time since the previous one',function(r){return r.prevH!=null&&r.prevH>=18;},function(r){return r.prevH!=null&&r.prevH<18;},'18 h or more','less than 18 h'),
+    cmp('Wake time',function(r){return r.wakeMin<=5*60+15;},function(r){return r.wakeMin>5*60+15;},'woke by 05:15','woke later')
+  ];
+  return I;
 }
 function last14(){var t=today();return keysBetween(addDays(t,-13),t);}
 function moveAt(){
@@ -225,6 +288,7 @@ function safetyFlags(){
   else if(recent.filter(function(b){return b.pain;}).length>=2)out.push('You logged pain more than once. If it continues, see a doctor.');
   var sorted=D.bms.slice().sort(function(a,b){return b.t-a.t;});
   if(sorted.length>=3&&sorted.slice(0,3).every(function(b){return b.ease==='hard';}))out.push('Your last 3 were hard. If this keeps up, talk to a pharmacist or doctor.');
+  if(recent.filter(function(b){return now-b.t<14*24*HOUR&&b.complete==='partial';}).length>=10)out.push('Most of your recent ones did not feel complete. If this continues, mention it to a doctor.');
   var lb=sorted[0];
   if(lb&&now-lb.t>72*HOUR)out.push('3 days without a bowel movement. If this happens often, talk to a pharmacist or doctor.');
   return out;
@@ -289,11 +353,18 @@ function renderWaiting(){
 }
 
 function renderResult(o){
-  var s=statsFor(last14()),tg=target();
-  var cmp=s.n>=3&&s.median!=null?(o.ttu<=s.median?'Faster than your usual '+dur(s.median)+'.':'Your usual is '+dur(s.median)+'.'):'Keep logging and the app will learn your normal.';
+  var s=statsFor(last14()),tg=target(),m=o.m;
+  var I=insights(),cmp=I.n>=2?'Your average: '+dur(I.avg)+' over '+I.n+' mornings.':'Keep logging and the app will learn your average.';
   var goal=o.hit?'Within your '+tg+'-min goal.':'Goal: within '+tg+' min.';
-  var out='<section class="card'+(o.hit?'':' boost')+'"><p class="eyebrow">Today</p><h2>First one at <span class="num">'+hm(o.bm.t)+'</span>, '+dur(o.ttu)+' after waking.</h2><p class="muted">'+goal+' '+cmp+'</p>';
-  if(o.complete==='partial')out+='<p>Did not feel complete. Tonight: fiber and water from your list. Next time, give it 2 more relaxed minutes with your feet on a footstool, breathing slowly. No straining.</p>';
+  var head=o.full?'Fully empty by <span class="num">'+hm(o.session.filter(function(b){return b.complete==='full';})[0].t)+'</span>, '+dur(o.tte)+' after waking.'
+    :(o.session.length>1?o.session.length+' so far this morning. Not fully empty yet.':'First one at <span class="num">'+hm(o.bm.t)+'</span>, '+dur(o.ttu)+' after waking.');
+  var rows=o.session.map(function(b,i){
+    var gap=i===0?dur(Math.round((b.t-m.up)/MIN))+' after waking':dur(Math.round((b.t-o.session[i-1].t)/MIN))+' later';
+    return '<div class="log-item"><span class="num">'+hm(b.t)+'</span><span>'+(i===0?'First':(i===1?'Second':(i===2?'Third':'#'+(i+1))))+' · '+gap+'</span><span>'+(b.ease?'<span class="tag '+b.ease+'">'+b.ease+'</span> ':'')+(b.complete==='full'?'<span class="tag easy">fully</span>':(b.complete==='partial'?'<span class="tag">not fully</span>':''))+'</span></div>';
+  }).join('');
+  var out='<section class="card'+(o.hit?'':' boost')+'"><p class="eyebrow">This morning</p><h2>'+head+'</h2><div class="log">'+rows+'</div><p class="muted">First one: '+dur(o.ttu)+'. '+goal+' '+cmp+'</p>';
+  var lastB=o.session[o.session.length-1];
+  if(!o.full&&lastB&&lastB.complete==='partial')out+='<p>Still not fully empty. If you feel more coming, go without delay, and log it here. Footstool, lean forward, breathe slowly, no straining.</p>';
   return out+'</section>';
 }
 
@@ -365,7 +436,7 @@ function renderEvening(open){
 function chartSvg(){
   var keys=last14(),W=340,H=170,L=30,R=8,T=14,B=30,tg=target(),CAP=240;
   var outs=keys.map(outcome);
-  var maxV=Math.max(60,tg+15);outs.forEach(function(o){if(o&&o.ttu!=null)maxV=Math.max(maxV,Math.min(o.ttu,CAP)+5);});
+  var maxV=Math.max(60,tg+15);outs.forEach(function(o){if(o&&o.span!=null)maxV=Math.max(maxV,Math.min(o.span,CAP)+5);});
   var step=maxV<=90?15:(maxV<=180?30:60);maxV=Math.ceil(maxV/step)*step;
   var y=function(v){return T+(H-T-B)*(1-v/maxV);},bw=(W-L-R)/keys.length;
   var g='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Minutes from waking to first bowel movement, last 14 days">';
@@ -373,6 +444,7 @@ function chartSvg(){
   g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(tg)+'" y2="'+y(tg)+'" stroke="var(--good)" stroke-dasharray="4 3"/><text x="'+(L+3)+'" y="'+(y(tg)-4)+'" fill="var(--good)" font-size="8" text-anchor="start">goal '+tg+'</text>';
   keys.forEach(function(k,i){
     var o=outs[i],x=L+i*bw,cx=x+bw/2;
+    if(o&&o.span!=null&&o.span>o.ttu){var sv=Math.min(o.span,CAP),fv=Math.min(o.ttu,CAP);g+='<rect x="'+(x+bw*.18)+'" y="'+y(sv)+'" width="'+(bw*.64)+'" height="'+Math.max(1,y(fv)-y(sv))+'" rx="2" fill="var(--muted)" opacity=".35"/>';}
     if(o&&o.ttu!=null){var vv=Math.min(o.ttu,CAP);g+='<rect x="'+(x+bw*.18)+'" y="'+y(vv)+'" width="'+(bw*.64)+'" height="'+Math.max(1,y(0)-y(vv))+'" rx="2" fill="'+(o.hit?'var(--good)':(o.ease==='hard'?'var(--bad)':'var(--accent)'))+'"/>';
       if(o.ttu>CAP)g+='<text x="'+cx+'" y="'+(y(vv)-3)+'" fill="var(--muted)" font-size="7" text-anchor="middle">'+Math.round(o.ttu/60)+'h</text>';}
     else if(o&&o.none)g+='<text x="'+cx+'" y="'+(T+8)+'" fill="var(--bad)" font-size="11" text-anchor="middle" font-weight="700">✕</text>';
@@ -386,7 +458,8 @@ function chartSvg(){
 
 function renderProgress(){
   var s=statsFor(last14()),st=D.settings,t=today();
-  var out='<section class="card"><p class="eyebrow">Last 14 days · from waking to first bowel movement</p><div class="stats"><div class="stat"><b>'+(s.n?s.hit+'/'+s.n:'–')+'</b><span>within '+target()+' min</span></div><div class="stat"><b>'+(s.median!=null?s.median:'–')+'</b><span>median min</span></div><div class="stat"><b>'+(s.min!=null?s.min:'–')+'</b><span>best min</span></div></div>'+chartSvg()+'<p class="muted" style="font-size:.85rem">Bars: minutes from waking to the first bowel movement. Green = within goal. ✕ = none that day. Yellow dot = prunes, kiwi or pear the day before.</p></section>';
+  var out='<section class="card"><p class="eyebrow">Last 14 days · from waking to first bowel movement</p><div class="stats"><div class="stat"><b>'+(s.n?s.hit+'/'+s.n:'–')+'</b><span>within '+target()+' min</span></div><div class="stat"><b>'+(s.avg!=null?s.avg:'–')+'</b><span>average min to first</span></div><div class="stat"><b>'+(s.emptyMedian!=null?s.emptyMedian:'–')+'</b><span>median min to fully empty</span></div></div>'+chartSvg()+'<p class="muted" style="font-size:.85rem">Bars: minutes from waking to the first bowel movement. Green = within goal. Faded top = later ones in the same morning. ✕ = none that day. Yellow dot = prunes, kiwi or pear the day before.</p></section>';
+  out+=renderInsights();
   var f=FOCUS[st.focus.name]||FOCUS.baseline,dayN=st.focus.start?daysBetween(st.focus.start,t)+1:1;
   out+='<section class="card"><p class="eyebrow">Current focus</p><h2>'+esc(f.label)+'</h2><p class="muted">'+(st.focus.name==='keep'?'All experiments finished.':'Day '+dayN+' of 7. After 7 days with at least 4 logged mornings, the app compares it with your normal and moves on.')+'</p>';
   var rk=Object.keys(st.results);
@@ -395,6 +468,36 @@ function renderProgress(){
   var list=D.bms.slice().sort(function(a,b){return b.t-a.t;}).slice(0,30);
   out+='<section class="card"><p class="eyebrow">Log</p>'+(list.length?'<div class="log">'+list.map(function(b){var del=confirmKey==='del:'+b.id;return '<div class="log-item"><span class="num">'+hm(b.t)+'</span><span>'+dayLabel(dk(b.t))+' '+(b.ease?'<span class="tag '+b.ease+'">'+b.ease+'</span> ':'')+(b.complete==='partial'?'<span class="tag">not fully</span> ':'')+(b.where?'<span class="tag">'+b.where+'</span> ':'')+(b.blood?'<span class="tag hard">blood</span> ':'')+(b.pain?'<span class="tag hard">pain</span>':'')+'</span><button class="btn small '+(del?'danger':'ghost')+'" data-act="'+(del?'del-confirm':'del')+'" data-id="'+b.id+'">'+(del?'Delete?':'Remove')+'</button></div>';}).join('')+'</div>':'<p class="muted">Nothing yet.</p>')+'</section>';
   return out;
+}
+
+function renderInsights(){
+  var I=insights();
+  function kv(label,val,note){return '<div class="log-item" style="grid-template-columns:1fr auto"><span>'+label+(note?' <span class="muted" style="font-size:.8rem">'+note+'</span>':'')+'</span><span class="num">'+val+'</span></div>';}
+  var out='<section class="card"><p class="eyebrow">Insights · last 30 days</p>';
+  if(!I.n)return out+'<p class="muted">Log a few mornings and your averages appear here.</p></section>';
+  out+='<h3>Averages</h3><div class="log">'+
+    kv('Waking to first one',dur(I.avg),I.n+' mornings')+
+    kv('Middle value (median)',dur(I.med),'less affected by one odd day')+
+    kv('Fastest · slowest',dur(I.min)+' · '+dur(I.max))+
+    kv('Waking to fully empty',I.fullN?dur(I.fullAvg):'–',I.fullN+' of '+I.n+' mornings fully empty')+
+    kv('Bowel movements per morning',I.perMorning!=null?I.perMorning:'–')+
+    kv('Bowel movements per day',I.perDay!=null?I.perDay:'–','last 14 days')+
+    (I.prevWeekN?kv('This week vs last week',dur(I.week)+' vs '+dur(I.prevWeek),(I.week<I.prevWeek?'faster':'slower')):'')+
+  '</div>';
+  out+='<h3>How fast your body responds</h3><div class="log">'+
+    kv('From coffee to first one',I.afterCoffeeN?dur(I.afterCoffee):'–',I.afterCoffeeN+' mornings')+
+    kv('From food to first one',I.afterFoodN?dur(I.afterFood):'–',I.afterFoodN+' mornings')+
+  '</div>';
+  out+='<h3>What goes with faster mornings</h3><div class="log">'+I.cmps.map(function(c){
+    if(!c.ready)return '<div class="log-item" style="grid-template-columns:1fr auto"><span>'+c.label+'</span><span class="muted" style="font-size:.85rem">needs more days ('+c.an+' / '+c.bn+')</span></div>';
+    var d=c.b-c.a,tag=d>=5?'<span class="tag easy">'+d+' min faster</span>':(d<=-5?'<span class="tag hard">'+(-d)+' min slower</span>':'<span class="tag">no clear difference</span>');
+    return '<div class="log-item" style="grid-template-columns:1fr auto"><span>'+c.label+'<br><span class="muted" style="font-size:.8rem">'+c.yesTxt+': '+dur(c.a)+' ('+c.an+') · '+c.noTxt+': '+dur(c.b)+' ('+c.bn+')</span></span>'+tag+'</div>';
+  }).join('')+'</div><p class="muted" style="font-size:.85rem">Each comparison needs at least 2 mornings on each side. With few days, treat these as hints, not proof. After 2–3 weeks they get much more reliable.</p>';
+  var rows=I.rows.slice().reverse().slice(0,14);
+  out+='<h3>Day by day</h3><div style="overflow-x:auto"><table class="days"><thead><tr><th>Day</th><th>Woke</th><th>Coffee</th><th>Food</th><th>First</th><th>#</th><th>Empty</th></tr></thead><tbody>'+
+    rows.map(function(r){return '<tr><td>'+dayLabel(r.k).replace(/ \w+$/,'')+'</td><td class="num">'+hm(r.up)+'</td><td class="num">'+(r.coffee!=null?'+'+r.coffee:'–')+'</td><td class="num">'+(r.food!=null?'+'+r.food:'–')+'</td><td class="num"><b>+'+r.ttu+'</b></td><td class="num">'+r.count+'</td><td>'+(r.full?'+'+r.tte:'no')+'</td></tr>';}).join('')+
+  '</tbody></table></div><p class="muted" style="font-size:.85rem">Minutes after waking. # = bowel movements that morning.</p>';
+  return out+'</section>';
 }
 
 function renderSettings(){
@@ -412,20 +515,23 @@ function summary(){
   var dayN=s.focus.start?daysBetween(s.focus.start,t)+1:1;
   lines.push('MORNING WINDOW v2 summary · '+t);
   lines.push('Usual wake '+s.wake+'. Goal '+target()+' min from waking. Focus: '+s.focus.name+' (day '+dayN+'). Move nudge at '+moveAt()+' min.'+(s.keepers.length?' Keepers: '+s.keepers.join(', ')+'.':''));
-  lines.push('14 days: '+st.n+' mornings · '+st.hit+' within goal · median '+(st.median!=null?st.median:'-')+' min'+(st.min!=null?' (best '+st.min+', worst '+st.max+')':'')+' · '+st.none+' days with none');
+  lines.push('14 days: '+st.n+' mornings · '+st.hit+' within goal · avg to first '+(st.avg!=null?st.avg:'-')+' min, median '+(st.median!=null?st.median:'-')+(st.min!=null?' (best '+st.min+', worst '+st.max+')':'')+' · fully empty on '+st.full+' (median '+(st.emptyMedian!=null?st.emptyMedian:'-')+' min) · '+st.none+' days with none');
+  var I=insights();
+  lines.push('Response: coffee→first avg '+(I.afterCoffee!=null?I.afterCoffee:'-')+' min ('+I.afterCoffeeN+'), food→first avg '+(I.afterFood!=null?I.afterFood:'-')+' min ('+I.afterFoodN+'). Per morning '+(I.perMorning!=null?I.perMorning:'-')+', per day '+(I.perDay!=null?I.perDay:'-')+'.');
+  lines.push('Compare (avg min to first, n): '+I.cmps.map(function(c){return c.label+': '+c.yesTxt+' '+(c.a!=null?c.a:'-')+' ('+c.an+') vs '+c.noTxt+' '+(c.b!=null?c.b:'-')+' ('+c.bn+')';}).join('; '));
   lines.push('Days (minutes after waking):');
   keys.forEach(function(k){
     var o=outcome(k),e=D.evenings[addDays(k,-1)],parts=[k.slice(5)];
     if(o){var m=o.m,sp=STEPS.filter(function(x){return m.steps&&m.steps[x.id];}).map(function(x){return x.id+'+'+Math.round((m.steps[x.id]-m.up)/MIN);}).join(' ');
       parts.push('woke '+hm(m.up)+(sp?' | '+sp:'')+(m.urge?' | urge+'+Math.round((m.urge-m.up)/MIN):''));
-      parts.push(o.bm?'FIRST BM +'+o.ttu+' ('+hm(o.bm.t)+')'+(o.ease?' '+o.ease:'')+(o.complete==='partial'?' not-complete':(o.complete==='full'?' complete':'')):(o.none?'no BM that day':'waiting'));}
+      parts.push(o.bm?o.session.map(function(b,i){return (i===0?'FIRST BM':'then')+' +'+Math.round((b.t-m.up)/MIN)+' ('+hm(b.t)+')'+(b.ease?' '+b.ease:'')+(b.complete==='partial'?' not-complete':(b.complete==='full'?' complete':''));}).join(' | ')+(o.full?' | fully empty at +'+o.tte:' | not fully empty'):(o.none?'no BM that day':'waiting'));}
     else if(!e)return;
     else parts.push('no morning logged');
     if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.pear==='y')ev.push('pear');if(e.oil)ev.push('oil '+e.oil);if(e.water)ev.push('1L '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(e.alcohol==='y')ev.push('alcohol');if(ev.length)parts.push('day before: '+ev.join(', '));}
     lines.push(parts.join(' | '));
   });
   var from=at(keys[0],'00:00');
-  var firstIds={};keys.forEach(function(k){var o=outcome(k);if(o&&o.bm)firstIds[o.bm.id]=1;});
+  var firstIds={};keys.forEach(function(k){var o=outcome(k);if(o&&o.session)o.session.forEach(function(b){firstIds[b.id]=1;});});
   var other=D.bms.filter(function(b){return b.t>=from&&!firstIds[b.id];}).sort(function(a,b){return a.t-b.t;}).map(function(b){return dk(b.t).slice(5)+' '+hm(b.t)+(b.ease?' '+b.ease:'')+(b.complete==='partial'?' not-complete':'');});
   lines.push('Other BMs: '+(other.length?other.join('; '):'none'));
   var fl=safetyFlags();lines.push('Flags: '+(fl.length?fl.join(' '):'none'));
