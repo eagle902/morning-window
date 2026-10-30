@@ -130,7 +130,7 @@ var STEPS=[
 ];
 
 /* ---------- storage ---------- */
-function fresh(){return {v:1,settings:{wake:'04:50',leave:'05:30',eveningFrom:'18:00',moveAt:null,tip:'',focus:{name:'baseline',start:null},results:{},keepers:[]},bms:[],mornings:{},evenings:{}};}
+function fresh(){return {v:1,settings:{wake:'04:50',target:40,eveningFrom:'18:00',moveAt:null,tip:'',focus:{name:'baseline',start:null},results:{},keepers:[]},bms:[],mornings:{},evenings:{}};}
 var D=null, raw=null, storageOk=true;
 try{raw=localStorage.getItem(KEY);}catch(e){storageOk=false;}
 if(raw){try{D=JSON.parse(raw);}catch(e){D=null;}}
@@ -159,26 +159,25 @@ function ago(ms){var m=Math.round((Date.now()-ms)/MIN);if(m<1)return 'just now';
 function minusHM(t,mins){var b=t.split(':').map(Number),x=((b[0]*60+b[1]-mins)%1440+1440)%1440;return pad(Math.floor(x/60))+':'+pad(x%60);}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
-function windowMins(){var w=D.settings.wake.split(':').map(Number),l=D.settings.leave.split(':').map(Number);return (l[0]*60+l[1])-(w[0]*60+w[1]);}
+function dur(min){if(min==null)return '–';if(min<60)return min+' min';return Math.floor(min/60)+'h '+pad(min%60)+'m';}
+function target(){var t=Number(D.settings.target);return t>=5&&t<=240?t:40;}
 
 /* ---------- analysis ---------- */
 function outcome(key){
   var m=D.mornings[key];if(!m||!m.up)return null;
-  var leave=at(key,D.settings.leave);
-  var bm=D.bms.filter(function(b){return b.t>=m.up-5*MIN&&b.t<=m.up+4*HOUR;}).sort(function(a,b){return a.t-b.t;})[0]||null;
-  var onTime=!!(bm&&bm.t<=leave+10*MIN);
-  var ref=bm?((m.urge&&m.urge<=bm.t&&m.urge>=m.up)?m.urge:bm.t):null;
-  var ttu=ref!=null?Math.max(0,Math.round((ref-m.up)/MIN)):null;
-  var missed=!onTime&&(!!m.missed||Date.now()>leave+60*MIN);
-  return {key:key,m:m,bm:bm,onTime:onTime,ttu:onTime?ttu:null,missed:missed,ease:bm?bm.ease:null};
+  var end=at(key,'23:59')+MIN;
+  var bm=D.bms.filter(function(b){return b.t>=m.up-5*MIN&&b.t<end;}).sort(function(a,b){return a.t-b.t;})[0]||null;
+  var ttu=bm?Math.max(0,Math.round((bm.t-m.up)/MIN)):null;
+  var none=!bm&&Date.now()>=end;
+  return {key:key,m:m,bm:bm,ttu:ttu,none:none,closed:!!bm||none,hit:ttu!=null&&ttu<=target(),ease:bm?bm.ease:null,complete:bm?bm.complete:null};
 }
 function statsFor(keys){
-  var outs=keys.map(outcome).filter(function(o){return o&&(o.onTime||o.missed);});
+  var outs=keys.map(outcome).filter(function(o){return o&&o.closed;});
   var t=outs.filter(function(o){return o.ttu!=null;}).map(function(o){return o.ttu;}).sort(function(a,b){return a-b;});
-  var on=outs.filter(function(o){return o.onTime;}).length;
+  var hit=outs.filter(function(o){return o.hit;}).length;
   var med=t.length?(t.length%2?t[(t.length-1)/2]:Math.round((t[t.length/2-1]+t[t.length/2])/2)):null;
   var avg=t.length?Math.round(t.reduce(function(a,b){return a+b;},0)/t.length):null;
-  return {n:outs.length,on:on,missed:outs.length-on,median:med,avg:avg,min:t.length?t[0]:null,max:t.length?t[t.length-1]:null,rate:outs.length?on/outs.length:null};
+  return {n:outs.length,hit:hit,none:outs.length-t.length,median:med,avg:avg,min:t.length?t[0]:null,max:t.length?t[t.length-1]:null,rate:outs.length?hit/outs.length:null};
 }
 function last14(){var t=today();return keysBetween(addDays(t,-13),t);}
 function moveAt(){
@@ -212,11 +211,11 @@ function advanceExperiment(){
 function lastBm(){return D.bms.slice().sort(function(a,b){return b.t-a.t;})[0]||null;}
 function roughReason(){
   var o=outcome(today()),lb=lastBm();
-  if(o&&o.missed)return 'You left this morning without going.';
-  if(o&&o.ttu!=null&&o.ttu>30)return 'This morning was slow ('+o.ttu+' min).';
+  if(o&&o.ttu!=null&&o.ttu>target())return 'Today it took '+dur(o.ttu)+' from waking.';
+  if(o&&!o.bm&&Date.now()-o.m.up>3*HOUR)return 'No bowel movement yet today.';
   if(o&&o.ease==='hard')return 'This morning was hard.';
+  if(o&&o.complete==='partial')return 'This morning did not feel complete.';
   if(lb&&Date.now()-lb.t>24*HOUR)return 'It has been more than a day since your last one.';
-  if(!lb)return null;
   return null;
 }
 function safetyFlags(){
@@ -239,8 +238,8 @@ function vibrate(p){try{navigator.vibrate&&navigator.vibrate(p);}catch(e){}}
 
 function mode(){
   var t=today(),now=Date.now(),m=D.mornings[t],s=D.settings;
-  if(m&&m.up&&!m.ended&&now<at(t,s.leave)+90*MIN)return 'morning';
-  if(!m&&now>=at(t,s.wake)-90*MIN&&now<=at(t,s.leave)+15*MIN)return 'start';
+  if(m&&m.up&&!m.ended)return (now-m.up<150*MIN)?'morning':'waiting';
+  if(!m&&now>=at(t,s.wake)-90*MIN&&now<at(t,'12:00'))return 'start';
   if(now>=at(t,s.eveningFrom)&&!(D.evenings[t]&&D.evenings[t].done))return 'evening';
   return 'day';
 }
@@ -259,15 +258,16 @@ function renderToday(){
   var md=mode(),out='';
   if(md==='morning')return renderMorning()+safetyHtml();
   if(md==='start'){
-    out+='<section class="card hero"><p class="eyebrow">Good morning</p><h1>Tap the moment you get up.</h1><p class="muted">Leave by <span class="num">'+D.settings.leave+'</span>. The app will walk you through it, one step at a time.</p><button class="btn huge primary" data-act="up">I\'m up</button></section>';
+    out+='<section class="card hero"><p class="eyebrow">Good morning</p><h1>Tap the moment you get up.</h1><p class="muted">The clock starts now. Your goal is the first bowel movement within <span class="num">'+target()+'</span> min of waking. The app walks you through it, one step at a time.</p><button class="btn huge primary" data-act="up">I\'m up</button></section>';
   }
+  if(md==='waiting')out+=renderWaiting();
   if(md==='evening')out+=renderEvening(true);
   out+=safetyHtml();
-  out+=renderLastCard(md!=='start'&&md!=='evening');
+  out+=renderLastCard(md==='day');
   var o=outcome(today());
-  if(o&&(o.onTime||o.missed))out+=renderResult(o);
+  if(o&&o.bm)out+=renderResult(o);
   if(md==='day')out+=renderEvening(false);
-  if(md==='day'&&!D.mornings[today()])out+='<button class="link" data-act="up">Start a morning routine now</button>';
+  if(md==='day'&&!D.mornings[today()])out+='<button class="link" data-act="up">Start a morning now</button>';
   return out;
 }
 
@@ -278,27 +278,39 @@ function renderLastCard(primary){
   return '<section class="card'+(primary?' hero':'')+'"><p class="eyebrow">Last bowel movement'+(count?' · '+count+' today':'')+'</p>'+body+'<button class="btn '+(primary?'big primary':'')+'" data-act="log">Log a bowel movement</button></section>';
 }
 
+function upEditor(m){
+  if(confirmKey==='edit-up')return '<div class="row"><input type="time" id="up-time" value="'+hm(m.up)+'" aria-label="Time you woke up" style="flex:1"><button class="btn primary small" data-act="save-up">Save</button></div>';
+  return '<button class="link" data-act="edit-up">Woke earlier? Change wake time</button>';
+}
+
+function renderWaiting(){
+  var m=D.mornings[today()],el=Math.round((Date.now()-m.up)/MIN);
+  return '<section class="card hero"><p class="eyebrow">Waiting for the first one today</p><div class="spread"><span class="big-time">'+dur(el)+'</span><span class="muted">since you woke at <span class="num">'+hm(m.up)+'</span></span></div><p class="muted">Whenever it comes, log it here. That gives the app your real time for today.</p><button class="btn big primary" data-act="log">Log it now</button>'+upEditor(m)+'<button class="link" data-act="cancel-morning">Started by mistake? Cancel this morning</button></section>';
+}
+
 function renderResult(o){
-  var s=statsFor(last14());
-  if(o.onTime){
-    var cmp=s.median!=null&&s.n>=3?(o.ttu<=s.median?'Faster than your usual '+s.median+' min.':'Your usual is '+s.median+' min.'):'Keep logging and the app will learn your normal.';
-    return '<section class="card"><p class="eyebrow">This morning</p><h2>Done at <span class="num">'+hm(o.bm.t)+'</span>, '+o.ttu+' min after getting up.</h2><p class="muted">'+cmp+'</p></section>';
-  }
-  return '<section class="card boost"><p class="eyebrow">This morning</p><h2>Left without going.</h2><p>Tonight\'s plan below is stronger to make tomorrow easier.</p></section>';
+  var s=statsFor(last14()),tg=target();
+  var cmp=s.n>=3&&s.median!=null?(o.ttu<=s.median?'Faster than your usual '+dur(s.median)+'.':'Your usual is '+dur(s.median)+'.'):'Keep logging and the app will learn your normal.';
+  var goal=o.hit?'Within your '+tg+'-min goal.':'Goal: within '+tg+' min.';
+  var out='<section class="card'+(o.hit?'':' boost')+'"><p class="eyebrow">Today</p><h2>First one at <span class="num">'+hm(o.bm.t)+'</span>, '+dur(o.ttu)+' after waking.</h2><p class="muted">'+goal+' '+cmp+'</p>';
+  if(o.complete==='partial')out+='<p>Did not feel complete. Tonight: fiber and water from your list. Next time, give it 2 more relaxed minutes with your feet on a footstool, breathing slowly. No straining.</p>';
+  return out+'</section>';
 }
 
 function renderMorning(){
-  var t=today(),m=D.mornings[t],now=Date.now(),s=D.settings;
-  var el=Math.floor((now-m.up)/MIN),left=Math.ceil((at(t,s.leave)-now)/MIN),mv=moveAt();
+  var t=today(),m=D.mornings[t],now=Date.now(),s=D.settings,tg=target();
+  var el=Math.floor((now-m.up)/MIN),toGoal=tg-el,mv=moveAt();
   var done=m.steps||{};
   var next=null;
   if(el>=mv&&!done.move)next=STEPS[3];
   else for(var i=0;i<STEPS.length;i++){if(!done[STEPS[i].id]){next=STEPS[i];break;}}
   var nudge='';
-  if(el>=8&&!done.water&&!done.coffee)nudge='You are '+el+' min in. Get the warm honey water in now.';
+  if(el>=6&&!done.water)nudge=el+' min in. Warm honey water now.';
+  else if(el>=12&&!done.coffee)nudge=el+' min in. Coffee now, it is one of your strongest triggers.';
+  else if(el>=18&&!done.food)nudge=el+' min in. Eat something now.';
   else if(el>=mv&&!done.move)nudge=el+' min in. This is usually where it stalls, so move now.';
-  else if(left<=10&&left>0)nudge=left+' min left. One more round of squats and a warm sip.';
-  var out='<section class="card hero"><div class="clock"><div class="left'+(left<0?' late':'')+'"><p class="eyebrow">'+(left>=0?'Leave in':'Past leave time')+'</p><b>'+Math.abs(left)+'</b> <span class="muted">min</span></div><div class="right muted">Up at <span class="num">'+hm(m.up)+'</span><br><span class="num">'+el+'</span> min in</div></div>'+(nudge?'<div class="nudge" role="status">'+esc(nudge)+'</div>':'')+'</section>';
+  else if(el>=tg)nudge='Past your goal. Another warm drink, 10 squats, then relax. It will come.';
+  var out='<section class="card hero"><div class="clock"><div class="left"><p class="eyebrow">Since you woke</p><b>'+el+'</b> <span class="muted">min</span></div><div class="right muted">Woke at <span class="num">'+hm(m.up)+'</span><br>'+(toGoal>=0?'<span class="num">'+toGoal+'</span> min to goal':'<span class="num">'+(-toGoal)+'</span> min past goal')+'</div></div>'+(nudge?'<div class="nudge" role="status">'+esc(nudge)+'</div>':'')+upEditor(m)+'</section>';
   if(next){
     var running=timer&&timer.id===next.id;
     out+='<section class="card"><p class="eyebrow">Next step</p><div class="step-title">'+esc(next.title)+'</div><p class="muted">'+esc(next.how)+'</p>';
@@ -307,12 +319,11 @@ function renderMorning(){
     else out+='<button class="btn big primary" data-act="step" data-id="'+next.id+'">Done</button>';
     out+='</section>';
   } else {
-    out+='<section class="card"><p class="eyebrow">All triggers done</p><div class="step-title">Relax and let it come.</div><p class="muted">Sip something warm (honey water, or ginger, fennel or chamomile tea), breathe slowly into your belly, stay close by. Go when you feel it. No straining.</p></section>';
+    out+='<section class="card"><p class="eyebrow">All triggers done</p><div class="step-title">Relax and let it come.</div><p class="muted">Sip something warm (honey water, or ginger, fennel or chamomile tea), breathe slowly into your belly, stay close by. If you have time, a 10-minute walk helps. Go when you feel it. No straining.</p></section>';
   }
   out+='<div class="chips">'+STEPS.map(function(st){var d=done[st.id];return '<button class="chip'+(d?' done':'')+'" data-act="chip" data-id="'+st.id+'" aria-pressed="'+(d?'true':'false')+'">'+(d?'✓ ':'')+esc(st.title.split(',')[0])+(d?' <span class="t">+'+Math.max(0,Math.round((d-m.up)/MIN))+'</span>':'')+'</button>';}).join('')+'</div>';
   if(s.tip)out+='<section class="card"><p class="eyebrow">From your plan</p><p>'+esc(s.tip)+'</p></section>';
   out+='<button class="btn huge primary" data-act="going">I feel it, going now</button>';
-  out+=confirmKey==='leave'?'<button class="btn danger" data-act="leave-confirm">Tap again to confirm: leaving without going</button>':'<button class="btn ghost" data-act="leave">Leaving without going</button>';
   out+='<button class="link" data-act="cancel-morning">Started by mistake? Cancel this morning</button>';
   return out;
 }
@@ -352,21 +363,22 @@ function renderEvening(open){
 }
 
 function chartSvg(){
-  var keys=last14(),W=340,H=170,L=26,R=8,T=12,B=30,win=windowMins();
+  var keys=last14(),W=340,H=170,L=30,R=8,T=14,B=30,tg=target(),CAP=240;
   var outs=keys.map(outcome);
-  var maxV=Math.max(60,win+10);outs.forEach(function(o){if(o&&o.ttu!=null)maxV=Math.max(maxV,o.ttu+5);});
-  maxV=Math.ceil(maxV/15)*15;
+  var maxV=Math.max(60,tg+15);outs.forEach(function(o){if(o&&o.ttu!=null)maxV=Math.max(maxV,Math.min(o.ttu,CAP)+5);});
+  var step=maxV<=90?15:(maxV<=180?30:60);maxV=Math.ceil(maxV/step)*step;
   var y=function(v){return T+(H-T-B)*(1-v/maxV);},bw=(W-L-R)/keys.length;
-  var g='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Minutes from getting up to going, last 14 days">';
-  for(var v=0;v<=maxV;v+=15){g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--line)" stroke-width="'+(v===0?1:.5)+'"/><text x="'+(L-4)+'" y="'+(y(v)+3)+'" fill="var(--muted)" font-size="8" text-anchor="end" font-family="var(--f-mono)">'+v+'</text>';}
-  g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(win)+'" y2="'+y(win)+'" stroke="var(--warn)" stroke-dasharray="4 3"/><text x="'+(W-R)+'" y="'+(y(win)-4)+'" fill="var(--warn)" font-size="8" text-anchor="end">leave time</text>';
+  var g='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Minutes from waking to first bowel movement, last 14 days">';
+  for(var v=0;v<=maxV;v+=step){g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--line)" stroke-width="'+(v===0?1:.5)+'"/><text x="'+(L-4)+'" y="'+(y(v)+3)+'" fill="var(--muted)" font-size="8" text-anchor="end" font-family="var(--f-mono)">'+v+'</text>';}
+  g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(tg)+'" y2="'+y(tg)+'" stroke="var(--good)" stroke-dasharray="4 3"/><text x="'+(L+3)+'" y="'+(y(tg)-4)+'" fill="var(--good)" font-size="8" text-anchor="start">goal '+tg+'</text>';
   keys.forEach(function(k,i){
     var o=outs[i],x=L+i*bw,cx=x+bw/2;
-    if(o&&o.ttu!=null)g+='<rect x="'+(x+bw*.18)+'" y="'+y(o.ttu)+'" width="'+(bw*.64)+'" height="'+(y(0)-y(o.ttu))+'" rx="2" fill="'+(o.ease==='hard'?'var(--bad)':'var(--accent)')+'"/>';
-    else if(o&&o.missed)g+='<text x="'+cx+'" y="'+(y(win)-6)+'" fill="var(--bad)" font-size="11" text-anchor="middle" font-weight="700">✕</text>';
+    if(o&&o.ttu!=null){var vv=Math.min(o.ttu,CAP);g+='<rect x="'+(x+bw*.18)+'" y="'+y(vv)+'" width="'+(bw*.64)+'" height="'+Math.max(1,y(0)-y(vv))+'" rx="2" fill="'+(o.hit?'var(--good)':(o.ease==='hard'?'var(--bad)':'var(--accent)'))+'"/>';
+      if(o.ttu>CAP)g+='<text x="'+cx+'" y="'+(y(vv)-3)+'" fill="var(--muted)" font-size="7" text-anchor="middle">'+Math.round(o.ttu/60)+'h</text>';}
+    else if(o&&o.none)g+='<text x="'+cx+'" y="'+(T+8)+'" fill="var(--bad)" font-size="11" text-anchor="middle" font-weight="700">✕</text>';
     else g+='<circle cx="'+cx+'" cy="'+(y(0)-3)+'" r="1.5" fill="var(--line)"/>';
     var ev=D.evenings[addDays(k,-1)];
-    if(ev&&(ev.prunes==='y'||ev.kiwi==='y'||ev.pear==='y'))g+='<circle cx="'+cx+'" cy="'+(H-20)+'" r="2.4" fill="var(--good)"/>';
+    if(ev&&(ev.prunes==='y'||ev.kiwi==='y'||ev.pear==='y'))g+='<circle cx="'+cx+'" cy="'+(H-20)+'" r="2.4" fill="var(--warn)"/>';
     g+='<text x="'+cx+'" y="'+(H-6)+'" fill="var(--muted)" font-size="8" text-anchor="middle" font-family="var(--f-mono)">'+Number(k.slice(8))+'</text>';
   });
   return g+'</svg>';
@@ -374,20 +386,20 @@ function chartSvg(){
 
 function renderProgress(){
   var s=statsFor(last14()),st=D.settings,t=today();
-  var out='<section class="card"><p class="eyebrow">Last 14 days</p><div class="stats"><div class="stat"><b>'+(s.n?s.on+'/'+s.n:'–')+'</b><span>mornings on time</span></div><div class="stat"><b>'+(s.median!=null?s.median:'–')+'</b><span>median min to go</span></div><div class="stat"><b>'+s.missed+'</b><span>left without</span></div></div>'+chartSvg()+'<p class="muted" style="font-size:.85rem">Bars: minutes from getting up to going. ✕ = left without going. Green dot = prunes, kiwi or pear the day before.</p></section>';
+  var out='<section class="card"><p class="eyebrow">Last 14 days · from waking to first bowel movement</p><div class="stats"><div class="stat"><b>'+(s.n?s.hit+'/'+s.n:'–')+'</b><span>within '+target()+' min</span></div><div class="stat"><b>'+(s.median!=null?s.median:'–')+'</b><span>median min</span></div><div class="stat"><b>'+(s.min!=null?s.min:'–')+'</b><span>best min</span></div></div>'+chartSvg()+'<p class="muted" style="font-size:.85rem">Bars: minutes from waking to the first bowel movement. Green = within goal. ✕ = none that day. Yellow dot = prunes, kiwi or pear the day before.</p></section>';
   var f=FOCUS[st.focus.name]||FOCUS.baseline,dayN=st.focus.start?daysBetween(st.focus.start,t)+1:1;
   out+='<section class="card"><p class="eyebrow">Current focus</p><h2>'+esc(f.label)+'</h2><p class="muted">'+(st.focus.name==='keep'?'All experiments finished.':'Day '+dayN+' of 7. After 7 days with at least 4 logged mornings, the app compares it with your normal and moves on.')+'</p>';
   var rk=Object.keys(st.results);
   if(rk.length)out+='<div class="log">'+rk.map(function(k){var r=st.results[k];return '<div class="log-item"><span class="tag'+(r.verdict==='helped'?' easy':'')+'">'+esc(r.verdict)+'</span><span>'+esc((FOCUS[k]||{label:k}).label)+'</span><span class="num muted">'+(r.avg!=null?r.avg+' min':'–')+(r.rate!=null?' · '+Math.round(r.rate*100)+'%':'')+'</span></div>';}).join('')+'</div>';
   out+='</section>';
   var list=D.bms.slice().sort(function(a,b){return b.t-a.t;}).slice(0,30);
-  out+='<section class="card"><p class="eyebrow">Log</p>'+(list.length?'<div class="log">'+list.map(function(b){var del=confirmKey==='del:'+b.id;return '<div class="log-item"><span class="num">'+hm(b.t)+'</span><span>'+dayLabel(dk(b.t))+' '+(b.ease?'<span class="tag '+b.ease+'">'+b.ease+'</span> ':'')+(b.where?'<span class="tag">'+b.where+'</span> ':'')+(b.blood?'<span class="tag hard">blood</span> ':'')+(b.pain?'<span class="tag hard">pain</span>':'')+'</span><button class="btn small '+(del?'danger':'ghost')+'" data-act="'+(del?'del-confirm':'del')+'" data-id="'+b.id+'">'+(del?'Delete?':'Remove')+'</button></div>';}).join('')+'</div>':'<p class="muted">Nothing yet.</p>')+'</section>';
+  out+='<section class="card"><p class="eyebrow">Log</p>'+(list.length?'<div class="log">'+list.map(function(b){var del=confirmKey==='del:'+b.id;return '<div class="log-item"><span class="num">'+hm(b.t)+'</span><span>'+dayLabel(dk(b.t))+' '+(b.ease?'<span class="tag '+b.ease+'">'+b.ease+'</span> ':'')+(b.complete==='partial'?'<span class="tag">not fully</span> ':'')+(b.where?'<span class="tag">'+b.where+'</span> ':'')+(b.blood?'<span class="tag hard">blood</span> ':'')+(b.pain?'<span class="tag hard">pain</span>':'')+'</span><button class="btn small '+(del?'danger':'ghost')+'" data-act="'+(del?'del-confirm':'del')+'" data-id="'+b.id+'">'+(del?'Delete?':'Remove')+'</button></div>';}).join('')+'</div>':'<p class="muted">Nothing yet.</p>')+'</section>';
   return out;
 }
 
 function renderSettings(){
   var s=D.settings;
-  return '<section class="card"><h2>Your schedule</h2><div class="grid2"><label class="field" for="set-wake">Get up<input type="time" id="set-wake" value="'+s.wake+'"></label><label class="field" for="set-leave">Leave by<input type="time" id="set-leave" value="'+s.leave+'"></label></div><label class="field" for="set-eve">Evening check-in from<input type="time" id="set-eve" value="'+s.eveningFrom+'"></label><button class="btn primary" data-act="save-sched">Save schedule</button></section>'+
+  return '<section class="card"><h2>Your mornings</h2><div class="grid2"><label class="field" for="set-wake">Usual wake time<input type="time" id="set-wake" value="'+s.wake+'"></label><label class="field" for="set-target">Goal (min from waking)<input type="number" id="set-target" min="5" max="240" inputmode="numeric" value="'+target()+'" style="font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px;min-height:48px;width:100%;box-sizing:border-box"></label></div><label class="field" for="set-eve">Evening check-in from<input type="time" id="set-eve" value="'+s.eveningFrom+'"></label><button class="btn primary" data-act="save-sched">Save</button></section>'+
   '<section class="card"><h2>Send to Claude</h2><p class="muted">Copies a short summary of the last 14 days. Paste it in our chat and I will send back a plan code.</p><button class="btn big primary" data-act="copy-summary">Copy summary</button><textarea id="out-summary" readonly hidden aria-label="Summary text"></textarea></section>'+
   '<section class="card"><h2>Plan from Claude</h2><p class="muted">Paste the plan code I give you, then tap Apply.</p><textarea id="in-plan" placeholder="PLAN {&quot;focus&quot;:&quot;prunes&quot;, ...}" aria-label="Plan code"></textarea><button class="btn primary" data-act="apply-plan">Apply plan</button>'+(s.tip?'<p class="muted">Current note: '+esc(s.tip)+'</p>':'')+'</section>'+
   '<section class="card"><h2>Backup</h2><p class="muted">Your data lives only on this phone'+(storageOk?'':' (and storage is blocked here, so it will be lost when you close this page)')+'. Copy a backup now and then, and keep it in a note or message.</p><div class="row"><button class="btn" data-act="copy-backup">Copy backup</button></div><textarea id="out-backup" readonly hidden aria-label="Backup text"></textarea><textarea id="in-backup" placeholder="Paste a backup here to restore" aria-label="Restore backup"></textarea>'+(confirmKey==='restore'?'<button class="btn danger" data-act="restore-confirm">Tap again: replace all data with this backup</button>':'<button class="btn" data-act="restore">Restore backup</button>')+'</section>'+
@@ -397,22 +409,24 @@ function renderSettings(){
 /* ---------- summary + plan ---------- */
 function summary(){
   var s=D.settings,keys=last14(),st=statsFor(keys),t=today(),lines=[];
-  var f=FOCUS[s.focus.name]||FOCUS.baseline,dayN=s.focus.start?daysBetween(s.focus.start,t)+1:1;
-  lines.push('MORNING WINDOW summary · '+t);
-  lines.push('Schedule: up '+s.wake+', leave '+s.leave+'. Focus: '+s.focus.name+' (day '+dayN+'). Move nudge at '+moveAt()+' min.'+(s.keepers.length?' Keepers: '+s.keepers.join(', ')+'.':''));
-  lines.push('14 days: '+st.n+' mornings · '+st.on+' on time · '+st.missed+' missed · median '+(st.median!=null?st.median:'-')+' min to go'+(st.min!=null?' (range '+st.min+'-'+st.max+')':''));
-  lines.push('Days:');
+  var dayN=s.focus.start?daysBetween(s.focus.start,t)+1:1;
+  lines.push('MORNING WINDOW v2 summary · '+t);
+  lines.push('Usual wake '+s.wake+'. Goal '+target()+' min from waking. Focus: '+s.focus.name+' (day '+dayN+'). Move nudge at '+moveAt()+' min.'+(s.keepers.length?' Keepers: '+s.keepers.join(', ')+'.':''));
+  lines.push('14 days: '+st.n+' mornings · '+st.hit+' within goal · median '+(st.median!=null?st.median:'-')+' min'+(st.min!=null?' (best '+st.min+', worst '+st.max+')':'')+' · '+st.none+' days with none');
+  lines.push('Days (minutes after waking):');
   keys.forEach(function(k){
     var o=outcome(k),e=D.evenings[addDays(k,-1)],parts=[k.slice(5)];
-    if(o){var m=o.m,sp=STEPS.filter(function(x){return m.steps&&m.steps[x.id];}).map(function(x){return x.id[0].toUpperCase()+'+'+Math.round((m.steps[x.id]-m.up)/MIN);}).join(' ');
-      parts.push('up '+hm(m.up)+(sp?' '+sp:'')+' → '+(o.onTime?'went +'+o.ttu+' ('+hm(o.bm.t)+')'+(o.ease?' '+o.ease:''):(o.missed?'MISSED':'open')));}
-    else parts.push('no morning');
-    if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.pear==='y')ev.push('pear');if(e.oil)ev.push('oil '+e.oil);if(e.water)ev.push('water '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(e.alcohol==='y')ev.push('alcohol');if(ev.length)parts.push('eve before: '+ev.join(', '));}
+    if(o){var m=o.m,sp=STEPS.filter(function(x){return m.steps&&m.steps[x.id];}).map(function(x){return x.id+'+'+Math.round((m.steps[x.id]-m.up)/MIN);}).join(' ');
+      parts.push('woke '+hm(m.up)+(sp?' | '+sp:'')+(m.urge?' | urge+'+Math.round((m.urge-m.up)/MIN):''));
+      parts.push(o.bm?'FIRST BM +'+o.ttu+' ('+hm(o.bm.t)+')'+(o.ease?' '+o.ease:'')+(o.complete==='partial'?' not-complete':(o.complete==='full'?' complete':'')):(o.none?'no BM that day':'waiting'));}
+    else if(!e)return;
+    else parts.push('no morning logged');
+    if(e){var ev=[];if(e.prunes==='y')ev.push('prunes');if(e.kiwi==='y')ev.push('kiwi');if(e.pear==='y')ev.push('pear');if(e.oil)ev.push('oil '+e.oil);if(e.water)ev.push('1L '+e.water);if(e.dinner)ev.push('dinner<19 '+e.dinner);if(e.alcohol==='y')ev.push('alcohol');if(ev.length)parts.push('day before: '+ev.join(', '));}
     lines.push(parts.join(' | '));
   });
   var from=at(keys[0],'00:00');
-  var morningIds={};keys.forEach(function(k){var o=outcome(k);if(o&&o.bm)morningIds[o.bm.id]=1;});
-  var other=D.bms.filter(function(b){return b.t>=from&&!morningIds[b.id];}).sort(function(a,b){return a.t-b.t;}).map(function(b){return dk(b.t).slice(5)+' '+hm(b.t)+(b.where?' '+b.where:'')+(b.ease?' '+b.ease:'');});
+  var firstIds={};keys.forEach(function(k){var o=outcome(k);if(o&&o.bm)firstIds[o.bm.id]=1;});
+  var other=D.bms.filter(function(b){return b.t>=from&&!firstIds[b.id];}).sort(function(a,b){return a.t-b.t;}).map(function(b){return dk(b.t).slice(5)+' '+hm(b.t)+(b.ease?' '+b.ease:'')+(b.complete==='partial'?' not-complete':'');});
   lines.push('Other BMs: '+(other.length?other.join('; '):'none'));
   var fl=safetyFlags();lines.push('Flags: '+(fl.length?fl.join(' '):'none'));
   return lines.join('\n');
@@ -423,7 +437,7 @@ function applyPlan(text){
   var p;try{p=JSON.parse(text.slice(a,b+1));}catch(e){return 'That code is incomplete. Copy it again from the chat.';}
   var s=D.settings,changed=[],re=/^\d{2}:\d{2}$/;
   if(p.wake&&re.test(p.wake)){s.wake=p.wake;changed.push('wake');}
-  if(p.leave&&re.test(p.leave)){s.leave=p.leave;changed.push('leave');}
+  if(typeof p.target==='number'&&p.target>=5&&p.target<=240){s.target=p.target;changed.push('goal');}
   if(p.focus&&FOCUS[p.focus]){s.focus={name:p.focus,start:today()};changed.push('focus');}
   if(p.moveAt===null||(typeof p.moveAt==='number'&&p.moveAt>=3&&p.moveAt<=40)){s.moveAt=p.moveAt;changed.push('move nudge');}
   if(typeof p.tip==='string'){s.tip=p.tip.slice(0,280);changed.push('note');}
@@ -439,21 +453,25 @@ function copyText(text,el){
 /* ---------- sheet: log a BM ---------- */
 var draft=null;
 function localInput(ms){var d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());}
-function openSheet(t){draft={t:t,ease:null,where:mode()==='morning'?'home':null,pain:false,blood:false};drawSheet();}
+function openSheet(t){draft={t:t,ease:null,complete:null,where:mode()==='morning'?'home':null,pain:false,blood:false,wake:''};drawSheet();}
 function drawSheet(){
   var el=document.getElementById('sheet');
   if(!draft){el.hidden=true;el.innerHTML='';return;}
   function sb(f,v,l){return '<button data-act="d" data-f="'+f+'" data-v="'+v+'" aria-pressed="'+(draft[f]===v?'true':'false')+'">'+l+'</button>';}
+  var needWake=!D.mornings[dk(draft.t)];
   el.hidden=false;
-  el.innerHTML='<div class="sheet-wrap" data-act="sheet-bg"><div class="sheet" role="dialog" aria-modal="true" aria-label="Log a bowel movement"><h2>Log a bowel movement</h2><label class="field" for="bm-time">When<input type="datetime-local" id="bm-time" value="'+localInput(draft.t)+'"></label><div class="seg-row"><span>How was it?</span><div class="seg">'+sb('ease','easy','Easy')+sb('ease','normal','Normal')+sb('ease','hard','Hard')+'</div></div><div class="seg-row"><span>Where</span><div class="seg">'+sb('where','home','Home')+sb('where','work','Work')+sb('where','other','Other')+'</div></div><div class="row"><label class="check" for="bm-pain"><input type="checkbox" id="bm-pain"'+(draft.pain?' checked':'')+'> Pain</label><label class="check" for="bm-blood"><input type="checkbox" id="bm-blood"'+(draft.blood?' checked':'')+'> Blood</label></div><button class="btn big primary" data-act="bm-save">Save</button><button class="btn ghost" data-act="bm-cancel">Cancel</button></div></div>';
+  el.innerHTML='<div class="sheet-wrap" data-act="sheet-bg"><div class="sheet" role="dialog" aria-modal="true" aria-label="Log a bowel movement"><h2>Log a bowel movement</h2><label class="field" for="bm-time">When<input type="datetime-local" id="bm-time" value="'+localInput(draft.t)+'"></label>'+
+  (needWake?'<label class="field" for="bm-wake">What time did you wake up that day? (so the app can count your time)<input type="time" id="bm-wake" value="'+esc(draft.wake||'')+'"></label>':'')+
+  '<div class="seg-row"><span>How was it?</span><div class="seg">'+sb('ease','easy','Easy')+sb('ease','normal','Normal')+sb('ease','hard','Hard')+'</div></div><div class="seg-row"><span>Felt empty after?</span><div class="seg">'+sb('complete','full','Fully')+sb('complete','partial','Not fully')+'</div></div><div class="seg-row"><span>Where</span><div class="seg">'+sb('where','home','Home')+sb('where','work','Work')+sb('where','other','Other')+'</div></div><div class="row"><label class="check" for="bm-pain"><input type="checkbox" id="bm-pain"'+(draft.pain?' checked':'')+'> Pain</label><label class="check" for="bm-blood"><input type="checkbox" id="bm-blood"'+(draft.blood?' checked':'')+'> Blood</label></div><button class="btn big primary" data-act="bm-save">Save</button><button class="btn ghost" data-act="bm-cancel">Cancel</button></div></div>';
 }
 function saveBm(){
   var v=document.getElementById('bm-time').value,t=v?new Date(v).getTime():draft.t;
   if(isNaN(t))t=draft.t;
-  var b={id:uid(),t:t,ease:draft.ease,where:draft.where,pain:document.getElementById('bm-pain').checked,blood:document.getElementById('bm-blood').checked};
+  var b={id:uid(),t:t,ease:draft.ease,complete:draft.complete,where:draft.where,pain:document.getElementById('bm-pain').checked,blood:document.getElementById('bm-blood').checked};
   D.bms.push(b);
-  var m=D.mornings[dk(t)];
-  if(m&&m.up&&!m.ended&&t>=m.up-5*MIN){m.ended=true;m.done=t;}
+  var key=dk(t),m=D.mornings[key],wv=document.getElementById('bm-wake');
+  if(!m&&wv&&wv.value){var up=at(key,wv.value);if(up<=t)D.mornings[key]={up:up,steps:{},ended:true,late:true};}
+  else if(m&&m.up&&!m.ended&&t>=m.up-5*MIN){m.ended=true;m.done=t;}
   save();draft=null;drawSheet();timer=null;
   toast(b.blood?'Saved. Please see a doctor about the blood.':'Saved');
   render();
@@ -465,19 +483,20 @@ document.addEventListener('click',function(e){
   var b=e.target.closest('[data-act]');if(!b)return;
   var act=b.dataset.act,id=b.dataset.id,t=today();
   if(act==='sheet-bg'){if(e.target===b){draft=null;drawSheet();}return;}
-  if(act!=='leave'&&act!=='del'&&act!=='restore')confirmKey=null;
+  if(act!=='del'&&act!=='restore'&&act!=='edit-up')confirmKey=null;
   switch(act){
     case 'up': D.mornings[t]={up:Date.now(),steps:{}};save();tab='today';vibrate(30);break;
     case 'step': var m=D.mornings[t];if(m){m.steps=m.steps||{};m.steps[id]=Date.now();save();}timer=null;vibrate(20);break;
     case 'chip': var m2=D.mornings[t];if(m2){m2.steps=m2.steps||{};if(m2.steps[id])delete m2.steps[id];else m2.steps[id]=Date.now();save();}break;
     case 'timer': var st=STEPS.filter(function(x){return x.id===id;})[0];timer={id:id,end:Date.now()+st.timer*1000};break;
     case 'going': var m3=D.mornings[t];if(m3){m3.urge=Date.now();save();}openSheet(Date.now());return;
-    case 'leave': confirmKey='leave';break;
-    case 'leave-confirm': var m4=D.mornings[t];if(m4){m4.missed=true;m4.ended=true;save();}toast('Logged. Tonight\'s plan is adjusted.');break;
+    case 'edit-up': confirmKey='edit-up';render();var ut=document.getElementById('up-time');if(ut)ut.focus();return;
+    case 'save-up': var m4=D.mornings[t],uv=document.getElementById('up-time');if(m4&&uv&&uv.value){var nu=at(t,uv.value);if(nu<=Date.now()){m4.up=nu;save();toast('Wake time changed');}else toast('That time is still ahead');}break;
     case 'cancel-morning': delete D.mornings[t];save();timer=null;break;
     case 'log': openSheet(Date.now());return;
     case 'd': draft[b.dataset.f]=draft[b.dataset.f]===b.dataset.v?null:b.dataset.v;
       draft.pain=document.getElementById('bm-pain').checked;draft.blood=document.getElementById('bm-blood').checked;
+      var wk=document.getElementById('bm-wake');if(wk)draft.wake=wk.value;
       var tv=document.getElementById('bm-time').value;if(tv&&!isNaN(new Date(tv).getTime()))draft.t=new Date(tv).getTime();
       drawSheet();return;
     case 'bm-save': saveBm();return;
@@ -489,8 +508,8 @@ document.addEventListener('click',function(e){
     case 'eve-done': var e3=D.evenings[t]=D.evenings[t]||{};e3.done=true;eveningOpen=false;save();toast('Good night. See you at '+D.settings.wake);break;
     case 'del': confirmKey=confirmKey==='del:'+id?null:'del:'+id;break;
     case 'del-confirm': D.bms=D.bms.filter(function(x){return x.id!==id;});save();break;
-    case 'save-sched': var w=document.getElementById('set-wake').value,l=document.getElementById('set-leave').value,ev=document.getElementById('set-eve').value;
-      if(w&&l&&w<l){D.settings.wake=w;D.settings.leave=l;if(ev)D.settings.eveningFrom=ev;save();toast('Schedule saved');}else toast('Leave time must be after get-up time');break;
+    case 'save-sched': var w=document.getElementById('set-wake').value,tg=parseInt(document.getElementById('set-target').value,10),ev=document.getElementById('set-eve').value;
+      if(w&&tg>=5&&tg<=240){D.settings.wake=w;D.settings.target=tg;if(ev)D.settings.eveningFrom=ev;save();toast('Saved');}else toast('Goal must be between 5 and 240 minutes');break;
     case 'copy-summary': copyText(summary(),document.getElementById('out-summary'));return;
     case 'apply-plan': toast(applyPlan(document.getElementById('in-plan').value||''));break;
     case 'copy-backup': copyText(JSON.stringify(D),document.getElementById('out-backup'));return;
@@ -518,7 +537,7 @@ setInterval(function(){
     else if(tv)tv.textContent=Math.floor(r/60)+':'+pad(r%60);
   }
   if(tab==='today'&&(md!==lastMode||(md==='morning'&&new Date().getSeconds()%15===0)||new Date().getSeconds()===0)){
-    var a=document.activeElement;if(!(a&&a.closest&&a.closest('.card')&&a.tagName==='BUTTON'))render();
+    var a=document.activeElement;if(!(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||(a.closest&&a.closest('.card')&&a.tagName==='BUTTON'))))render();
   }
   lastMode=md;
 },1000);
